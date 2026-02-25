@@ -47,7 +47,7 @@ jobs:
           tags: |
             type=sha
 
-      - name: Build & Push Multi-Stage Image
+      - name: Build & Push Image
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -71,7 +71,7 @@ jobs:
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_PASSWORD }}
+          password: ${{ secrets.VM_PASSWORD }}
           script: |
             docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
             docker pull ${{ needs.build.outputs.image }}
@@ -94,7 +94,7 @@ jobs:
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
+          password: ${{ secrets.VM_PASSWORD }}
           script: |
             docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
             docker pull ${{ needs.build.outputs.image }}
@@ -117,7 +117,7 @@ jobs:
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
+          password: ${{ secrets.VM_PASSWORD }}
           script: |
             docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
             docker pull ${{ needs.build.outputs.image }}
