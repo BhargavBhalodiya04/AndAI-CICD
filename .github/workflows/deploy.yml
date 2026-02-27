@@ -1,12 +1,24 @@
 name: Build & Push Docker Image to AWS ECR
 
 on:
-  workflow_dispatch:   # Manual trigger only
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - uat
+          - prod
 
 jobs:
   build:
-    name: Build and Push using Self-Hosted Runner
+    name: Build and Push (Self Hosted)
     runs-on: self-hosted
+
+    # This loads environment secrets (dev/uat/prod)
+    environment: ${{ github.event.inputs.environment }}
 
     steps:
       - name: Checkout Code
@@ -24,16 +36,17 @@ jobs:
 
       - name: Build Docker Image
         run: |
-          docker build -t ${{ secrets.ECR_REPOSITORY }}:latest .
+          docker build -t ${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }} .
 
       - name: Tag Docker Image
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          docker tag ${{ secrets.ECR_REPOSITORY }}:latest \
-          $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
+          docker tag \
+          ${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }} \
+          $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }}
 
-      - name: Push Docker Image to ECR
+      - name: Push to ECR
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           docker push \
-          $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
+          $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }}
