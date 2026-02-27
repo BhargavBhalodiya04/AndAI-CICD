@@ -1,4 +1,4 @@
-name: Build & Push Docker Image to AWS ECR
+name: Deploy ECR Image to VM
 
 on:
   workflow_dispatch:
@@ -13,37 +13,33 @@ on:
           - prod
 
 jobs:
-  build:
-    runs-on: self-hosted
+  deploy:
+    runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Deploy to VM via SSH
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          password: ${{ secrets.VM_PASSWORD }}
+          script: |
+            echo "Getting AWS Account ID..."
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
+            IMAGE_URI=$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }}
 
-      - name: Build Docker Image
-        run: |
-          sudo docker build -t ${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }} .
+            echo "Logging into ECR..."
+            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
+            | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
 
-      - name: Tag Docker Image
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          sudo docker tag \
-          ${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }} \
-          $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }}
+            echo "Pulling latest image..."
+            docker pull $IMAGE_URI
 
-      - name: Push Docker Image
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          sudo docker push \
-          $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }}
+            echo "Stopping old container..."
+            docker stop my-app || true
+            docker rm my-app || true
+
+            echo "Starting new container..."
+            docker run -d --name my-app -p 80:3000 $IMAGE_URI
