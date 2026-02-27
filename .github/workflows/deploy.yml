@@ -1,29 +1,22 @@
-name: Build, Push & Deploy to VM
+name: CI/CD - Build, Push & Deploy to Dev
 
 on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: "Select environment"
-        required: true
-        type: choice
-        options:
-          - dev
-          - uat
-          - prod
+  push:
+    branches:
+      - main
 
 jobs:
-  deploy:
+  deploy-dev:
     runs-on: self-hosted
-    environment: ${{ github.event.inputs.environment }}
+    environment: dev
 
     steps:
 
-      # 1️⃣ Checkout
+      # 1️⃣ Checkout code
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2️⃣ Configure AWS (for self-hosted runner)
+      # 2️⃣ Configure AWS credentials (for build machine)
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -31,50 +24,47 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 3️⃣ Get Account ID
+      # 3️⃣ Get AWS Account ID
       - name: Get AWS Account ID
         id: aws-account
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
 
-      # 4️⃣ Login to ECR (Runner)
+      # 4️⃣ Login to ECR (on self-hosted runner)
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 5️⃣ Build & Push Image
-      - name: Build and Push Docker Image
+      # 5️⃣ Build & Push Docker Image
+      - name: Build and Push Image
         run: |
-          IMAGE_URI=$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }}
-
+          IMAGE_URI=$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:dev
           echo "Building image: $IMAGE_URI"
           docker build -t $IMAGE_URI .
-
           echo "Pushing image..."
           docker push $IMAGE_URI
 
-      # 6️⃣ Deploy to Target VM
-      - name: Deploy to VM via SSH
+      # 6️⃣ SSH into Dev VM and Deploy
+      - name: Deploy to Dev VM
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           password: ${{ secrets.VM_PASSWORD }}
           script: |
+            REGION="${{ secrets.AWS_REGION }}"
+            REPO="${{ secrets.ECR_REPOSITORY }}"
+
             echo "Getting AWS Account ID..."
             ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-            REGION="${{ secrets.AWS_REGION }}"
-            REPO="${{ secrets.ECR_REPOSITORY }}"
-            ENVIRONMENT="${{ github.event.inputs.environment }}"
-
-            IMAGE_URI=$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:$ENVIRONMENT
+            IMAGE_URI=$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:dev
 
             echo "Logging into ECR..."
             aws ecr get-login-password --region $REGION \
             | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
 
-            echo "Pulling image: $IMAGE_URI"
+            echo "Pulling latest image..."
             docker pull $IMAGE_URI
 
             echo "Stopping old container..."
