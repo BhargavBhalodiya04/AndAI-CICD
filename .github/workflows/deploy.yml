@@ -14,10 +14,7 @@ on:
 
 jobs:
   build:
-    name: Build and Push (Self Hosted)
     runs-on: self-hosted
-
-    # This loads environment secrets (dev/uat/prod)
     environment: ${{ github.event.inputs.environment }}
 
     steps:
@@ -36,17 +33,17 @@ jobs:
 
       - name: Build Docker Image
         run: |
-          docker build -t ${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }} .
+          sudo docker build -t ${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }} .
 
       - name: Tag Docker Image
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          docker tag \
+          sudo docker tag \
           ${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }} \
           $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }}
 
-      - name: Push to ECR
+      - name: Push Docker Image
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          docker push \
+          sudo docker push \
           $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }}
