@@ -18,11 +18,12 @@ jobs:
     environment: ${{ github.event.inputs.environment }}
 
     steps:
-      # 1️⃣ Checkout Code
+
+      # 1️⃣ Checkout code
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2️⃣ Configure AWS Credentials
+      # 2️⃣ Configure AWS credentials (for build machine)
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -30,25 +31,23 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 3️⃣ Login to ECR
+      # 3️⃣ Login to ECR (on self-hosted runner)
       - name: Login to Amazon ECR
-        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 4️⃣ Build Docker Image
-      - name: Build Docker Image
+      # 4️⃣ Build & Push Image to ECR
+      - name: Build and Push Docker Image
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           IMAGE_URI=$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }}
-          docker build -t $IMAGE_URI .
-          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
-      # 5️⃣ Push to ECR
-      - name: Push Docker Image
-        run: |
+          echo "Building image..."
+          docker build -t $IMAGE_URI .
+
+          echo "Pushing image..."
           docker push $IMAGE_URI
 
-      # 6️⃣ SSH into Target VM & Deploy
+      # 5️⃣ SSH into Target VM and Deploy
       - name: Deploy to VM via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -56,9 +55,14 @@ jobs:
           username: ${{ secrets.VM_USER }}
           password: ${{ secrets.VM_PASSWORD }}
           script: |
+            echo "Getting AWS Account ID..."
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+            IMAGE_URI=$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }}
+
             echo "Logging into ECR..."
             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
-            | docker login --username AWS --password-stdin $(echo $IMAGE_URI | cut -d/ -f1)
+            | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
 
             echo "Pulling latest image..."
             docker pull $IMAGE_URI
