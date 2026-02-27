@@ -1,4 +1,4 @@
-name: Manual Multi-Stage Deployment
+name: Manual Multi-Stage Deployment (ECR + Compose)
 
 on:
   workflow_dispatch:
@@ -13,58 +13,52 @@ on:
           - prod
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
 
 jobs:
 
 # =========================
-# 1️⃣ BUILD DOCKER IMAGE
+# 1️⃣ BUILD & PUSH TO ECR
 # =========================
   build:
-    name: Build & Push Docker Image
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-      packages: write
+    name: Build & Push to ECR
+    runs-on: self-hosted
 
     outputs:
-      image: ${{ steps.meta.outputs.tags }}
+      image: ${{ steps.image.outputs.image }}
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Generate Docker Metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha
+      - name: Login to ECR
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          aws ecr get-login-password --region $AWS_REGION \
+          | docker login --username AWS --password-stdin \
+          $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-      - name: Build & Push Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Build & Push Image (Tag = Build ID)
+        id: image
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          IMAGE=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:${{ github.run_number }}
+
+          docker build -t $IMAGE .
+          docker push $IMAGE
+
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+
 
 # =========================
-# 2️⃣ DEPLOY TO SELECTED ENV
+# 2️⃣ DEPLOY USING DOCKER COMPOSE
 # =========================
   deploy:
     name: Deploy to ${{ github.event.inputs.environment }}
@@ -73,30 +67,36 @@ jobs:
     environment: ${{ github.event.inputs.environment }}
 
     steps:
-      - name: SSH & Deploy to Server
+      - name: SSH Deploy via Docker Compose
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
-          password: ${{ secrets.VM_PASSWORD }}
+          password: ${{ secrets.VM_PASSWORD }}   # ✅ Username + Password login
           script: |
-            echo "Logging into GHCR..."
-            echo "${{ secrets.GITHUB_TOKEN }}" | sudo docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            echo "Pulling latest image..."
-            sudo docker pull ${{ needs.build.outputs.image }}
+            export AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            export AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            export AWS_REGION=${{ secrets.AWS_REGION }}
 
-            echo "Stopping old container..."
-            sudo docker rm -f my-app || true
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-            echo "Freeing port 3000..."
-            sudo fuser -k 3000/tcp || true
+            # Login to ECR
+            aws ecr get-login-password --region $AWS_REGION \
+            | sudo docker login --username AWS --password-stdin \
+            $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-            echo "Starting new container..."
-            sudo docker run -d \
-              --name my-app \
-              -p 3000:3000 \
-              --restart always \
-              ${{ needs.build.outputs.image }}
+            # Go to project directory (already cloned on VM)
+            cd /home/${{ secrets.VM_USER }}/your-project-folder
 
-            echo "Deployment completed!"
+            # Set image tag dynamically for compose
+            export IMAGE_TAG=${{ github.run_number }}
+
+            # Pull latest image
+            sudo docker compose pull
+
+            # Restart services
+            sudo docker compose down
+            sudo docker compose up -d --remove-orphans
+
+            echo "Deployment Completed Successfully"
