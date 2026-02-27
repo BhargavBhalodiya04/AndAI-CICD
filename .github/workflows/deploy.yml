@@ -19,11 +19,11 @@ jobs:
 
     steps:
 
-      # 1️⃣ Checkout code
+      # 1️⃣ Checkout
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2️⃣ Configure AWS credentials (for build machine)
+      # 2️⃣ Configure AWS (for self-hosted runner)
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -31,23 +31,29 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 3️⃣ Login to ECR (on self-hosted runner)
+      # 3️⃣ Get Account ID
+      - name: Get AWS Account ID
+        id: aws-account
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
+
+      # 4️⃣ Login to ECR (Runner)
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 4️⃣ Build & Push Image to ECR
+      # 5️⃣ Build & Push Image
       - name: Build and Push Docker Image
         run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           IMAGE_URI=$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }}
 
-          echo "Building image..."
+          echo "Building image: $IMAGE_URI"
           docker build -t $IMAGE_URI .
 
           echo "Pushing image..."
           docker push $IMAGE_URI
 
-      # 5️⃣ SSH into Target VM and Deploy
+      # 6️⃣ Deploy to Target VM
       - name: Deploy to VM via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -58,13 +64,17 @@ jobs:
             echo "Getting AWS Account ID..."
             ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-            IMAGE_URI=$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ github.event.inputs.environment }}
+            REGION="${{ secrets.AWS_REGION }}"
+            REPO="${{ secrets.ECR_REPOSITORY }}"
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+
+            IMAGE_URI=$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:$ENVIRONMENT
 
             echo "Logging into ECR..."
-            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
-            | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+            aws ecr get-login-password --region $REGION \
+            | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
 
-            echo "Pulling latest image..."
+            echo "Pulling image: $IMAGE_URI"
             docker pull $IMAGE_URI
 
             echo "Stopping old container..."
