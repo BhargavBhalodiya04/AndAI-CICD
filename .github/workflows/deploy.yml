@@ -19,11 +19,11 @@ jobs:
 
     steps:
 
-      # 1️⃣ Checkout Code
+      # 1️Checkout Code
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2️⃣ Configure AWS (for build machine)
+      # 2️Configure AWS (for build machine)
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -31,17 +31,17 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 3️⃣ Get AWS Account ID
+      # 3️Get AWS Account ID
       - name: Get AWS Account ID
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
 
-      # 4️⃣ Login to ECR (self-hosted runner)
+      # 4️Login to ECR (self-hosted runner)
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 5️⃣ Build & Push Docker Image
+      # 5️Build & Push Docker Image
       - name: Build and Push Image
         run: |
           ENVIRONMENT=${{ github.event.inputs.environment }}
@@ -51,7 +51,7 @@ jobs:
           docker build -t $IMAGE_URI .
           docker push $IMAGE_URI
 
-      # 6️⃣ Deploy to Selected Environment VM
+      # 6️Deploy to Selected Environment VM
       - name: Deploy to VM
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -81,3 +81,4 @@ jobs:
 
             echo "Starting new container..."
             docker run -d --name my-app -p 80:3000 $IMAGE_URI
+
