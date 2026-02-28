@@ -4,7 +4,7 @@ const app = express();
 const PORT = 3000;
 
 app.get('/', (req, res) => {
-    res.send('🚀 Demo Node App is Running! V1');
+    res.send('🚀 Demo Node App is Running! V2');
 });
 
 app.get('/health', (req, res) => {
@@ -15,3 +15,4 @@ app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 
 });
+
